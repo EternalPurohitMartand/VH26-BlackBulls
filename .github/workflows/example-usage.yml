@@ -1,0 +1,17 @@
+name: LeakGuard CI
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  leakguard-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run LeakGuard Resource Checker
+        uses: ./ # Points to the action.yml in the root of the repo
+        with:
+          target_directory: './test_repo'

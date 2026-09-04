@@ -1,0 +1,1 @@
+from .checker import analyze_file
