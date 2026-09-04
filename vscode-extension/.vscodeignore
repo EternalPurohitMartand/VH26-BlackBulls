@@ -1,0 +1,14 @@
+.vscode/**
+.vscode-test/**
+.gitignore
+**/*.py
+**/__pycache__/**
+**/*.pyc
+node_modules/**
+test_repo/**
+ml_pipeline/**
+analyzer/**
+open_source_tests/**
+Dockerfile
+*.yml
+*.md

@@ -1,0 +1,67 @@
+{
+  "name": "leakguard",
+  "displayName": "LeakGuard - Resource Leak Detector",
+  "description": "Static AST-based detection of unclosed resources in Python code",
+  "version": "0.1.0",
+  "publisher": "leakguard",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Linters", "Programming Languages"],
+  "activationEvents": [
+    "onLanguage:python",
+    "workspaceContains:**/*.py"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "python",
+        "aliases": ["Python"],
+        "extensions": [".py"]
+      }
+    ],
+    "configuration": {
+      "title": "LeakGuard",
+      "properties": {
+        "leakguard.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python executable used to run LeakGuard analyzer"
+        },
+        "leakguard.analyzerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to LeakGuard analyzer directory (auto-detected if empty)"
+        },
+        "leakguard.severity": {
+          "type": "string",
+          "default": "Warning",
+          "enum": ["Error", "Warning", "Information"],
+          "description": "Diagnostic severity for detected leaks"
+        },
+        "leakguard.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan file on every save"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "leakguard.scanFile",
+        "title": "LeakGuard: Scan Current File"
+      },
+      {
+        "command": "leakguard.scanWorkspace",
+        "title": "LeakGuard: Scan Workspace"
+      }
+    ]
+  },
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0"
+  }
+}

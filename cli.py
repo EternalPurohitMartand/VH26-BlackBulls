@@ -109,6 +109,9 @@ def main():
 
     total_files = 0
     definite_leaks = 0
+    high_risk_count = 0
+    medium_risk_count = 0
+    low_risk_count = 0
     uncertain_count = 0
     fixed_count = 0
     auto_fix_all = auto_yes
@@ -128,26 +131,35 @@ def main():
                         if leak.get('status', 'LEAK') == 'UNCERTAIN':
                             uncertain_count += 1
                             try:
-                                from ml_pipeline.predictor import get_leak_confidence
+                                from ml_pipeline.predictor import get_leak_confidence, categorize_risk
                                 confidence = get_leak_confidence(filepath)
                             except ImportError:
                                 confidence = None
-                            
+
                             if confidence is not None:
-                                print(f"⚠️  WARNING file={leak['file_name']},line={leak['line_number']}::Resource '{leak['resource_name']}' ownership uncertain. ML Leak Risk: {confidence:.1f}%")
+                                risk = categorize_risk(confidence)
+                                c, r = risk['color'], risk['reset']
+                                print(f"{c}::warning file={leak['file_name']},line={leak['line_number']}::[ML {risk['label']}] Resource '{leak['resource_name']}' ownership uncertain. Confidence: {confidence:.1f}% | Action: {risk['action']}{r}")
+
+                                if risk['tier'] == 'HIGH':
+                                    high_risk_count += 1
+                                    if strict_mode:
+                                        definite_leaks += 1
+                                elif risk['tier'] == 'MEDIUM':
+                                    medium_risk_count += 1
+                                else:
+                                    low_risk_count += 1
                             else:
                                 print(f"⚠️  WARNING file={leak['file_name']},line={leak['line_number']}::Resource '{leak['resource_name']}' ownership uncertain ({leak['leak_type']}).")
-                            
-                            if strict_mode:
-                                definite_leaks += 1
+                                if strict_mode:
+                                    definite_leaks += 1
                         else:
                             definite_leaks += 1
                             print(f"::error file={leak['file_name']},line={leak['line_number']}::Resource '{leak['resource_name']}' leaked ({leak['leak_type']}).")
-                            
-                            # INTERACTIVE AUTO-FIX PROMPT WITH 'ALL' OPTION
+
                             if fix_mode:
                                 print(f"\n  💡 Auto-Fix available for {leak['file_name']} (Line {leak['line_number']})")
-                                
+
                                 if auto_fix_all:
                                     choice = 'y'
                                 else:
@@ -155,19 +167,22 @@ def main():
                                     if choice == 'a':
                                         auto_fix_all = True
                                         choice = 'y'
-                                
+
                                 if choice == 'y':
                                     apply_patch(leak)
                                     print("  ✅ Patch applied successfully!\n")
                                     fixed_count += 1
-                                    definite_leaks -= 1  # Remove from blocker count since we fixed it
+                                    definite_leaks -= 1
 
     print("\n" + "=" * 42)
     print("              LEAKGUARD REPORT")
     print("=" * 42)
     print(f"Files scanned:             {total_files}")
-    print(f"Definite leaks found:      {definite_leaks + fixed_count}")
+    print(f"Definite leaks (AST):      {definite_leaks + fixed_count}")
     print(f"Uncertain ownership:       {uncertain_count}")
+    print(f"  ├─ HIGH risk (BLOCK):     {high_risk_count}")
+    print(f"  ├─ MEDIUM risk (WARN):    {medium_risk_count}")
+    print(f"  └─ LOW risk (PASS):       {low_risk_count}")
     print(f"Patches applied:           {fixed_count}")
     print(f"Strict mode:               {'ENABLED' if strict_mode else 'DISABLED'}")
     print(f"Auto-Fix mode:             {'ENABLED' if fix_mode else 'DISABLED'}")
