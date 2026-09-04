@@ -8,12 +8,13 @@ class LeakVisitor(ast.NodeVisitor):
         self.leaks: List[Dict[str, Any]] = []
         self.resources: Dict[str, Dict[str, Any]] = {}
 
-    def record_leak(self, line_number: int, var_name: str, leak_type: str):
+    def record_finding(self, line_number: int, var_name: str, leak_type: str, status: str = "LEAK"):
         self.leaks.append({
             "file_name": self.filename,
             "line_number": line_number,
             "resource_name": var_name,
-            "leak_type": leak_type
+            "leak_type": leak_type,
+            "status": status  # This MUST be "status" so cli.py can read it
         })
 
     def visit_FunctionDef(self, node):
@@ -22,24 +23,20 @@ class LeakVisitor(ast.NodeVisitor):
         self.generic_visit(node)
         for var, state in self.resources.items():
             if state['status'] == 'OPEN':
-                self.record_leak(state['line'], var, "Missing close")
+                self.record_finding(state['line'], var, "Missing close", status="LEAK")
+            elif state['status'] == 'UNCERTAIN':
+                self.record_finding(state['line'], var, "Cross-function handoff", status="UNCERTAIN")
         self.resources = old_resources
 
     def visit_With(self, node):
         self.generic_visit(node)
 
     def visit_Try(self, node):
-        # Traverse body first
         for body_node in node.body:
             self.visit(body_node)
-            
-        # Check if there is a finally block containing close calls
-        has_finally_cleanup = False
         if node.finalbody:
             for handler in node.finalbody:
                 self.visit(handler)
-
-        # Traverse except handlers
         for handler in node.handlers:
             self.visit(handler)
 
@@ -47,7 +44,6 @@ class LeakVisitor(ast.NodeVisitor):
         if isinstance(node.value, ast.Call):
             func = node.value.func
             is_target = False
-            
             if isinstance(func, ast.Name) and func.id == 'open':
                 is_target = True
             elif isinstance(func, ast.Attribute) and func.attr == 'connect':
@@ -63,19 +59,33 @@ class LeakVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node):
+        # Check if resource is being closed locally
         if isinstance(node.func, ast.Attribute):
             if node.func.attr == 'close' and isinstance(node.func.value, ast.Name):
                 var_name = node.func.value.id
-                if var_name in self.resources and self.resources[var_name]['status'] == 'OPEN':
+                if var_name in self.resources and self.resources[var_name]['status'] in ['OPEN', 'UNCERTAIN']:
                     self.resources[var_name]['status'] = 'CLOSED'
+
+        # Check if resource is passed as an argument to another function (ownership transfer boundary)
+        for arg in node.args:
+            if isinstance(arg, ast.Name):
+                var_name = arg.id
+                if var_name in self.resources and self.resources[var_name]['status'] == 'OPEN':
+                    self.resources[var_name]['status'] = 'UNCERTAIN'
+
         self.generic_visit(node)
 
     def check_control_flow_leak(self, node, flow_type: str):
         for var, state in self.resources.items():
             if state['status'] == 'OPEN':
-                self.record_leak(node.lineno, var, f"{flow_type} bypass")
+                self.record_finding(node.lineno, var, f"{flow_type} bypass", status="LEAK")
 
     def visit_Return(self, node):
+        if isinstance(node.value, ast.Name):
+            var_name = node.value.id
+            if var_name in self.resources and self.resources[var_name]['status'] == 'OPEN':
+                self.resources[var_name]['status'] = 'UNCERTAIN'
+        
         self.check_control_flow_leak(node, "Early return")
         self.generic_visit(node)
 
