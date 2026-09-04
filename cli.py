@@ -1,7 +1,29 @@
 # cli.py
+from ml_pipeline.predictor import get_leak_confidence
 import sys
 import os
 from analyzer.checker import analyze_file
+
+def apply_patch(leak):
+    """Calculates original indentation and safely injects a .close() statement."""
+    filepath = leak['file_name']
+    var_name = leak['resource_name']
+    line_num = leak['line_number'] - 1  # Convert to 0-indexed array
+    
+    with open(filepath, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+        
+    # Calculate the exact indentation of the original open() statement
+    open_line = lines[line_num]
+    indentation = len(open_line) - len(open_line.lstrip())
+    indent_str = " " * indentation
+    
+    # Inject the auto-fix patch
+    patch_line = f"{indent_str}{var_name}.close()  # 🛠️ [LeakGuard Auto-Patch]\n"
+    lines.append("\n" + patch_line)
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.writelines(lines)
 
 def run_benchmark():
     test_dir = "test_repo"
@@ -24,7 +46,7 @@ def run_benchmark():
                 
                 if "obvious" in root or "tricky" in root:
                     # Ignore uncertain ownership files for strict leak counting in benchmark
-                    if not any(l['status'] == 'UNCERTAIN' for l in leaks):
+                    if not any(l.get('status', 'LEAK') == 'UNCERTAIN' for l in leaks):
                         intentional_leaks += 1
                         if leaks:
                             detected_leaks += 1
@@ -49,7 +71,7 @@ def run_benchmark():
 def main():
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  python cli.py <target_directory> [--strict]")
+        print("  python cli.py <target_directory> [--strict] [--fix]")
         print("  python cli.py benchmark")
         sys.exit(1)
 
@@ -58,10 +80,12 @@ def main():
 
     target_dir = sys.argv[1]
     strict_mode = "--strict" in sys.argv
+    fix_mode = "--fix" in sys.argv
 
     total_files = 0
     definite_leaks = 0
     uncertain_count = 0
+    fixed_count = 0
 
     if not os.path.exists(target_dir):
         print(f"Error: Directory '{target_dir}' not found.")
@@ -74,34 +98,52 @@ def main():
                 filepath = os.path.join(root, file)
                 file_leaks = analyze_file(filepath)
                 if file_leaks:
-                    if file_leaks:
-                     for leak in file_leaks:
-                        # Use .get() to prevent KeyError if status is missing
+                    for leak in file_leaks:
                         if leak.get('status', 'LEAK') == 'UNCERTAIN':
                             uncertain_count += 1
-                            print(f"⚠️  WARNING file={leak['file_name']},line={leak['line_number']}::Resource '{leak['resource_name']}' ownership uncertain ({leak['leak_type']}).")
+                            # 🧠 Ask the ML Model for a confidence score!
+                            confidence = get_leak_confidence(filepath)
+                            
+                            if confidence is not None:
+                                print(f"⚠️  WARNING file={leak['file_name']},line={leak['line_number']}::Resource '{leak['resource_name']}' ownership uncertain. ML Leak Risk: {confidence:.1f}%")
+                            else:
+                                print(f"⚠️  WARNING file={leak['file_name']},line={leak['line_number']}::Resource '{leak['resource_name']}' ownership uncertain ({leak['leak_type']}).")
+                            
                             if strict_mode:
                                 definite_leaks += 1
                         else:
                             definite_leaks += 1
                             print(f"::error file={leak['file_name']},line={leak['line_number']}::Resource '{leak['resource_name']}' leaked ({leak['leak_type']}).")
+                            
+                            # INTERACTIVE AUTO-FIX PROMPT
+                            if fix_mode:
+                                print(f"\n  💡 Auto-Fix available for {leak['file_name']} (Line {leak['line_number']})")
+                                choice = input(f"  ❓ Apply patch to safely close '{leak['resource_name']}'? [y/N]: ")
+                                if choice.strip().lower() == 'y':
+                                    apply_patch(leak)
+                                    print("  ✅ Patch applied successfully!\n")
+                                    fixed_count += 1
+                                    definite_leaks -= 1  # Remove from blocker count since we fixed it
+
     print("\n" + "=" * 42)
     print("              LEAKGUARD REPORT")
     print("=" * 42)
     print(f"Files scanned:             {total_files}")
-    print(f"Definite leaks found:      {definite_leaks}")
+    print(f"Definite leaks found:      {definite_leaks + fixed_count}")
     print(f"Uncertain ownership:       {uncertain_count}")
+    print(f"Patches applied:           {fixed_count}")
     print(f"Strict mode:               {'ENABLED' if strict_mode else 'DISABLED'}")
+    print(f"Auto-Fix mode:             {'ENABLED' if fix_mode else 'DISABLED'}")
     print("-" * 42)
 
     if definite_leaks > 0:
         print("❌ CI STATUS: BLOCKED")
-        print(f"\n{definite_leaks} resource violation(s) found.")
+        print(f"\n{definite_leaks} unresolved resource violation(s) remaining.")
         print("=" * 42)
         sys.exit(1)
     else:
         print("✅ CI STATUS: PASSED")
-        print("\nNo definite resource leaks detected.")
+        print("\nNo unresolved resource leaks detected.")
         print("=" * 42)
         sys.exit(0)
 

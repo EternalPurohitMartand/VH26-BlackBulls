@@ -1,0 +1,8 @@
+file_name,has_with_statement,has_try_finally,explicit_close_calls,returns_early,raises_exception,passed_to_function,is_leak
+fail_never_closed.py,0,0,1,1,0,0,1
+pass_manual_close.py,0,0,1,1,0,0,0
+pass_try_finally.py,0,1,1,0,0,0,0
+pass_with_statement.py,1,0,0,0,0,0,0
+fail_early_return.py,0,0,1,1,0,0,1
+fail_exception_bypass.py,0,0,2,0,1,0,1
+uncertain_ownership.py,0,0,0,0,0,1,0
