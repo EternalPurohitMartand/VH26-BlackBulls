@@ -28,6 +28,21 @@ class LeakVisitor(ast.NodeVisitor):
     def visit_With(self, node):
         self.generic_visit(node)
 
+    def visit_Try(self, node):
+        # Traverse body first
+        for body_node in node.body:
+            self.visit(body_node)
+            
+        # Check if there is a finally block containing close calls
+        has_finally_cleanup = False
+        if node.finalbody:
+            for handler in node.finalbody:
+                self.visit(handler)
+
+        # Traverse except handlers
+        for handler in node.handlers:
+            self.visit(handler)
+
     def visit_Assign(self, node):
         if isinstance(node.value, ast.Call):
             func = node.value.func
