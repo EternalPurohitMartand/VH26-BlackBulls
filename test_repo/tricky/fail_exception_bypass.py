@@ -8,3 +8,6 @@ def exception_leak():
         f.close()
     except ValueError:
         print("Caught an error")
+        f.close()  # 🛠️ [LeakGuard Auto-Patch]
+
+        f.close()  # [LeakGuard Auto-Patch]

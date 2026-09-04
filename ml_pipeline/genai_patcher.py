@@ -16,7 +16,7 @@ def generate_safe_code(filepath, line_number, resource_name):
     genai.configure(api_key=api_key)
     
     # We use gemini-2.5-flash as it is blazing fast for code refactoring
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-3.8-flash')
 
     with open(filepath, 'r', encoding='utf-8') as f:
         original_code = f.read()

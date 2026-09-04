@@ -5,27 +5,6 @@ import sys
 import os
 from analyzer.checker import analyze_file
 
-def apply_patch(leak):
-    """Calculates original indentation and safely injects a .close() statement."""
-    filepath = leak['file_name']
-    var_name = leak['resource_name']
-    line_num = leak['line_number'] - 1  # Convert to 0-indexed array
-    
-    with open(filepath, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-        
-    # Calculate the exact indentation of the original open() statement
-    open_line = lines[line_num]
-    indentation = len(open_line) - len(open_line.lstrip())
-    indent_str = " " * indentation
-    
-    # Inject the auto-fix patch
-    patch_line = f"{indent_str}{var_name}.close()  # 🛠️ [LeakGuard Auto-Patch]\n"
-    lines.append("\n" + patch_line)
-    
-    with open(filepath, 'w', encoding='utf-8') as f:
-        f.writelines(lines)
-
 def run_benchmark():
     test_dir = "test_repo"
     if not os.path.exists(test_dir):
@@ -57,7 +36,7 @@ def run_benchmark():
                         false_positives += 1
 
     print("\n" + "╭" + "─" * 36 + "╮")
-    print("│       LEAKGUARD BENCHMARK          │")
+    print("│         LEAKGUARD BENCHMARK          │")
     print("╰" + "─" * 36 + "╯")
     print(f"Intentional leak tests:  {intentional_leaks}")
     print(f"Correctly detected:      {detected_leaks}")
@@ -69,10 +48,8 @@ def run_benchmark():
     print("=" * 38)
     sys.exit(0)
 
-# ... (your other functions like run_benchmark and imports are above)
-
 def apply_patch(leak):
-    """Uses GenAI to intelligently refactor the leaking file, falling back to manual close if needed."""
+    """Uses GenAI to intelligently refactor the leaking file, falling back to clean line insertion with proper indentation if needed."""
     filepath = leak['file_name']
     var_name = leak['resource_name']
     line_num = leak['line_number']
@@ -88,14 +65,19 @@ def apply_patch(leak):
         print("  ⚠️ GenAI patch skipped. Applying fallback .close() injection...")
         with open(filepath, 'r', encoding='utf-8') as f:
             lines = f.readlines()
+            
+        # Get the exact indentation of the line where the resource was opened
         open_line = lines[line_num - 1]
         indentation = len(open_line) - len(open_line.lstrip())
         indent_str = " " * indentation
+        
+        # Format the patch with matching indentation and insert it cleanly
         patch_line = f"{indent_str}{var_name}.close()  # [LeakGuard Auto-Patch]\n"
-        lines.append("\n" + patch_line)
+        lines.insert(line_num, patch_line)
+        
         with open(filepath, 'w', encoding='utf-8') as f:
             f.writelines(lines)
-        print("  ✅ Fallback patch applied successfully!\n")
+        print("  ✅ Fallback patch applied successfully with correct indentation!\n")
 
 def main():
     if len(sys.argv) < 2:
@@ -115,6 +97,7 @@ def main():
     definite_leaks = 0
     uncertain_count = 0
     fixed_count = 0
+    auto_fix_all = False  # Track bulk approval for auto-fixes
 
     if not os.path.exists(target_dir):
         print(f"Error: Directory '{target_dir}' not found.")
@@ -144,11 +127,19 @@ def main():
                             definite_leaks += 1
                             print(f"::error file={leak['file_name']},line={leak['line_number']}::Resource '{leak['resource_name']}' leaked ({leak['leak_type']}).")
                             
-                            # INTERACTIVE AUTO-FIX PROMPT
+                            # INTERACTIVE AUTO-FIX PROMPT WITH 'ALL' OPTION
                             if fix_mode:
                                 print(f"\n  💡 Auto-Fix available for {leak['file_name']} (Line {leak['line_number']})")
-                                choice = input(f"  ❓ Apply patch to safely close '{leak['resource_name']}'? [y/N]: ")
-                                if choice.strip().lower() == 'y':
+                                
+                                if auto_fix_all:
+                                    choice = 'y'
+                                else:
+                                    choice = input(f"  ❓ Apply patch to safely close '{leak['resource_name']}'? [y/N/a (all)]: ").strip().lower()
+                                    if choice == 'a':
+                                        auto_fix_all = True
+                                        choice = 'y'
+                                
+                                if choice == 'y':
                                     apply_patch(leak)
                                     print("  ✅ Patch applied successfully!\n")
                                     fixed_count += 1
