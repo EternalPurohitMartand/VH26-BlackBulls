@@ -6,7 +6,7 @@ WORKDIR /app
 COPY . /app
 
 # Install the ML dependencies
-RUN pip install pandas scikit-learn joblib
+RUN pip install pandas scikit-learn joblib google-genai
 
 # The CLI will be our main execution point
 ENTRYPOINT ["python", "/app/cli.py"]

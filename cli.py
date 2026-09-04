@@ -1,6 +1,4 @@
 # cli.py
-from ml_pipeline.genai_patcher import generate_safe_code
-from ml_pipeline.predictor import get_leak_confidence
 import sys
 import os
 from analyzer.checker import analyze_file
@@ -12,10 +10,10 @@ def run_benchmark():
         sys.exit(1)
 
     total_files = 0
-    intentional_leaks = 0
-    safe_files = 0
-    detected_leaks = 0
-    false_positives = 0
+    tp = 0  # leak files correctly detected
+    fn = 0  # leak files missed
+    fp = 0  # safe files wrongly flagged
+    tn = 0  # safe files correctly passed
 
     for root, _, files in os.walk(test_dir):
         for file in files:
@@ -23,33 +21,48 @@ def run_benchmark():
                 total_files += 1
                 filepath = os.path.join(root, file)
                 leaks = analyze_file(filepath)
-                
-                if "obvious" in root or "tricky" in root:
-                    # Ignore uncertain ownership files for strict leak counting in benchmark
-                    if not any(l.get('status', 'LEAK') == 'UNCERTAIN' for l in leaks):
-                        intentional_leaks += 1
-                        if leaks:
-                            detected_leaks += 1
-                elif "safe" in root:
-                    safe_files += 1
-                    if leaks:
-                        false_positives += 1
+                has_leak = any(l.get('status') == 'LEAK' for l in leaks)
+
+                is_leak_file = ("obvious" in root or "tricky" in root) and "uncertain" not in file
+
+                if is_leak_file:
+                    if has_leak:
+                        tp += 1
+                    else:
+                        fn += 1
+                else:
+                    if has_leak:
+                        fp += 1
+                    else:
+                        tn += 1
+
+    precision = tp / (tp + fp) * 100 if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) * 100 if (tp + fn) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
 
     print("\n" + "╭" + "─" * 36 + "╮")
     print("│         LEAKGUARD BENCHMARK          │")
     print("╰" + "─" * 36 + "╯")
-    print(f"Intentional leak tests:  {intentional_leaks}")
-    print(f"Correctly detected:      {detected_leaks}")
-    print(f"Safe program tests:      {safe_files}")
-    print(f"False positives:         {false_positives}")
+    print(f"Files scanned:            {total_files}")
+    print(f"True Positives (TP):      {tp}")
+    print(f"False Negatives (FN):     {fn}")
+    print(f"False Positives (FP):     {fp}")
+    print(f"True Negatives (TN):      {tn}")
     print("-" * 38)
-    print("Precision:               100.0%")
-    print("Recall:                  100.0%")
+    print(f"Precision:                {precision:.1f}%")
+    print(f"Recall:                   {recall:.1f}%")
+    print(f"F1 Score:                 {f1:.1f}%")
     print("=" * 38)
     sys.exit(0)
 
 def apply_patch(leak):
     """Uses GenAI to intelligently refactor the leaking file, falling back to clean line insertion with proper indentation if needed."""
+    try:
+        from ml_pipeline.genai_patcher import generate_safe_code
+    except ImportError:
+        print("\n❌ google-genai package not installed. Run: pip install google-genai")
+        return
+
     filepath = leak['file_name']
     var_name = leak['resource_name']
     line_num = leak['line_number']
@@ -82,7 +95,7 @@ def apply_patch(leak):
 def main():
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  python cli.py <target_directory> [--strict] [--fix]")
+        print("  python cli.py <target_directory> [--strict] [--fix] [--yes]")
         print("  python cli.py benchmark")
         sys.exit(1)
 
@@ -92,12 +105,13 @@ def main():
     target_dir = sys.argv[1]
     strict_mode = "--strict" in sys.argv
     fix_mode = "--fix" in sys.argv
+    auto_yes = "--yes" in sys.argv
 
     total_files = 0
     definite_leaks = 0
     uncertain_count = 0
     fixed_count = 0
-    auto_fix_all = False  # Track bulk approval for auto-fixes
+    auto_fix_all = auto_yes
 
     if not os.path.exists(target_dir):
         print(f"Error: Directory '{target_dir}' not found.")
@@ -113,8 +127,11 @@ def main():
                     for leak in file_leaks:
                         if leak.get('status', 'LEAK') == 'UNCERTAIN':
                             uncertain_count += 1
-                            # 🧠 Ask the ML Model for a confidence score!
-                            confidence = get_leak_confidence(filepath)
+                            try:
+                                from ml_pipeline.predictor import get_leak_confidence
+                                confidence = get_leak_confidence(filepath)
+                            except ImportError:
+                                confidence = None
                             
                             if confidence is not None:
                                 print(f"⚠️  WARNING file={leak['file_name']},line={leak['line_number']}::Resource '{leak['resource_name']}' ownership uncertain. ML Leak Risk: {confidence:.1f}%")
