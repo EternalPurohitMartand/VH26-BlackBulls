@@ -1,4 +1,5 @@
 # cli.py
+from ml_pipeline.genai_patcher import generate_safe_code
 from ml_pipeline.predictor import get_leak_confidence
 import sys
 import os
@@ -67,6 +68,34 @@ def run_benchmark():
     print("Recall:                  100.0%")
     print("=" * 38)
     sys.exit(0)
+
+# ... (your other functions like run_benchmark and imports are above)
+
+def apply_patch(leak):
+    """Uses GenAI to intelligently refactor the leaking file, falling back to manual close if needed."""
+    filepath = leak['file_name']
+    var_name = leak['resource_name']
+    line_num = leak['line_number']
+    
+    print(f"\n  🤖 Triggering GenAI Auto-Refactor for {filepath}...")
+    safe_code = generate_safe_code(filepath, line_num, var_name)
+    
+    if safe_code:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(safe_code)
+        print("  ✅ GenAI successfully refactored and patched the file!\n")
+    else:
+        print("  ⚠️ GenAI patch skipped. Applying fallback .close() injection...")
+        with open(filepath, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        open_line = lines[line_num - 1]
+        indentation = len(open_line) - len(open_line.lstrip())
+        indent_str = " " * indentation
+        patch_line = f"{indent_str}{var_name}.close()  # [LeakGuard Auto-Patch]\n"
+        lines.append("\n" + patch_line)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+        print("  ✅ Fallback patch applied successfully!\n")
 
 def main():
     if len(sys.argv) < 2:
